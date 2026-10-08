@@ -136,7 +136,7 @@ def analyze_context(
         plan = parse_plan(client.generate(prompt))
 
     grounding = validate_plan_grounding(plan, repository_context, issue)
-    output = dict(plan.__dict__)
+    output = {"contributor_plan": dict(plan.__dict__)}
     output["grounding"] = grounding
     output["review"] = review_contribution_plan(plan, grounding, repository_context).to_dict()
     return output
@@ -147,11 +147,12 @@ def main() -> int:
     args = build_parser().parse_args()
 
     try:
+        collection_metadata = {}
         if bool(args.repo_url) != bool(args.issue_url):
             raise ValueError("Provide both --repo-url and --issue-url together.")
         if args.repo_url and args.issue_url:
             target = parse_github_urls(args.repo_url, args.issue_url)
-            repository_context, issue = GitHubCollector().collect(target)
+            repository_context, issue, collection_metadata = GitHubCollector().collect_with_metadata(target)
         else:
             repository_context = read_context(args.context)
             issue = args.issue
@@ -172,6 +173,8 @@ def main() -> int:
             "issue": issue,
             "selected_files": sorted(extract_evidence_files(repository_context)),
             "evidence_supplied": repository_context,
+            "selection_diagnostics": collection_metadata.get("selection_diagnostics", []),
+            "indexed_files": collection_metadata.get("indexed_files", []),
         }
     print(json.dumps(output, indent=2))
     return 0

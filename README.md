@@ -100,5 +100,14 @@ repository:
 python -m app.evaluate --fixture evaluations/hello-world-issue-1.json --verbose
 ```
 
+Save an evaluation artifact:
+
+```powershell
+python -m app.evaluate `
+  --fixture evaluations/itsdangerous-429.json `
+  --verbose `
+  --output evaluations/itsdangerous-429-result.json
+```
+
 The JSON output preserves the Contributor Plan, grounding result, review, and
 verbose diagnostics for the retrieved issue and supplied evidence.

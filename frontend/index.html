@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ContribSim · Open Source Simulator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand"><span class="material-symbols-outlined">terminal</span><div><strong>ContribSim</strong><small>Open Source Simulator</small></div></div>
+      <div class="eyebrow">Workspace</div>
+      <nav class="side-nav"><a class="active" href="#ingest"><span class="material-symbols-outlined">analytics</span>New Analysis</a><a href="#plan"><span class="material-symbols-outlined">model_training</span>Contributor Simulator</a><a href="#review"><span class="material-symbols-outlined">fact_check</span>Review &amp; Readiness</a></nav>
+      <div class="engine"><span class="dot green"></span><span>Backend analysis</span><code>server-side</code></div>
+    </aside>
+    <main class="shell">
+      <header class="topbar"><div class="repo-chip"><span class="material-symbols-outlined">stethoscope_arrow</span><span id="repo-label">No repository loaded</span></div><span class="badge" id="status-badge">Ready</span><div class="top-actions"><span class="status"><span class="dot green"></span>Analysis API</span><button id="theme-button" aria-label="Toggle theme"><span class="material-symbols-outlined">dark_mode</span></button></div></header>
+      <section class="hero" id="ingest"><div class="crumb">ContribSim <span>/</span> New Analysis</div><h1>Issue Ingestion Workspace</h1><p>Grounded contribution planning for an unfamiliar open-source repository.</p></section>
+      <section class="content"><div class="ingest-card card"><div class="section-heading"><div><span class="eyebrow">START HERE</span><h2>Analyze an issue</h2></div><span class="contract">POST /api/analyze</span></div><form id="analysis-form"><label for="repository-url">Repository URL</label><input id="repository-url" type="url" required placeholder="https://github.com/owner/repository" /><label for="issue-url">Issue URL</label><input id="issue-url" type="url" required placeholder="https://github.com/owner/repository/issues/42" /><div class="form-footer"><button class="primary" type="submit" id="analyze-button"><span class="material-symbols-outlined">analytics</span>Analyze Issue <span>→</span></button><span class="helper" id="form-message">The backend collects repository evidence and evaluates the issue.</span></div></form></div>
+        <div class="lifecycle card"><div class="section-heading"><h2>Contribution lifecycle</h2><span class="contract">grounded response flow</span></div><div class="steps"><div class="step active"><span>1</span><div><strong>Issue</strong><small>Repository + issue URLs</small></div></div><div class="step"><span>2</span><div><strong>Plan</strong><small>Contributor plan</small></div></div><div class="step"><span>3</span><div><strong>Grounding</strong><small>Evidence validation</small></div></div><div class="step"><span>4</span><div><strong>Review</strong><small>Readiness assessment</small></div></div></div></div>
+        <div id="loading" class="card loading hidden"><span class="material-symbols-outlined spin">progress_activity</span><div><strong>Analyzing repository evidence…</strong><p>Collecting the issue, repository tree, and selected files.</p></div></div>
+        <div id="error" class="card error hidden"><span class="material-symbols-outlined">error_outline</span><div><strong>Analysis failed</strong><p id="error-message"></p></div></div>
+        <section id="results" class="hidden"><div class="results-header"><div><span class="eyebrow">ANALYSIS RESULT</span><h2>Contributor Simulator</h2></div><span class="contract">response: contributor_plan · grounding · review</span></div><div class="result-grid"><div class="column"><article class="card" id="plan"><div class="section-heading"><h2>Contributor Plan</h2><span class="badge blue">Backend response</span></div><div id="plan-content"></div></article><article class="card" id="grounding"><div class="section-heading"><h2>Evidence Grounding</h2><span class="badge" id="grounding-status">—</span></div><div id="grounding-content"></div></article></div><div class="column"><article class="card" id="review"><div class="section-heading"><h2>Review &amp; Readiness</h2><span class="score" id="readiness-score">—</span></div><div id="review-content"></div></article><article class="card future"><div><span class="material-symbols-outlined">lock</span><div><strong>PR Draft &amp; Repository Mutation</strong><p>Future Feature · ContribSim does not create pull requests or modify upstream repositories.</p></div></div></article></div></div></section>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

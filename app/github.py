@@ -1,6 +1,7 @@
 """Small, bounded GitHub collector for the Phase 2 prototype."""
 
 import base64
+import ast
 import json
 import re
 from dataclasses import dataclass
@@ -49,10 +50,15 @@ class GitHubCollector:
 
     api_url: str = "https://api.github.com"
     max_files: int = 8
+    max_index_files: int = 16
     max_file_chars: int = 12000
     timeout: float = 20.0
 
     def collect(self, target: GitHubTarget) -> tuple[str, str]:
+        context, issue, _ = self.collect_with_metadata(target)
+        return context, issue
+
+    def collect_with_metadata(self, target: GitHubTarget) -> tuple[str, str, dict]:
         repository = self._get(f"/repos/{target.owner}/{target.repository}")
         issue = self._get(f"/repos/{target.owner}/{target.repository}/issues/{target.issue_number}")
         branch = repository.get("default_branch")
@@ -66,13 +72,20 @@ class GitHubCollector:
         if not isinstance(entries, list):
             raise GitHubError("GitHub returned an invalid repository tree.")
 
-        selected = select_context_files(entries, self.max_files, format_issue(issue))
+        issue_text = format_issue(issue)
+        index_paths = select_index_paths(entries, self.max_index_files)
+        content_cache: dict[str, str] = {}
+        for path in index_paths:
+            content_cache[path] = limit_content(self._get_file_content(target, branch, path), self.max_file_chars)
+
+        symbol_index = build_symbol_index(content_cache)
+        ranked = rank_context_files(entries, self.max_files, issue_text, symbol_index)
+        selected = [item["path"] for item in ranked]
         files = []
         for path in selected:
-            content = self._get(
-                f"/repos/{target.owner}/{target.repository}/contents/{parse.quote(path, safe='/')}?ref={parse.quote(branch)}"
-            )
-            file_content = limit_content(decode_content(content), self.max_file_chars)
+            file_content = content_cache.get(path)
+            if file_content is None:
+                file_content = limit_content(self._get_file_content(target, branch, path), self.max_file_chars)
             files.append(
                 {
                     "path": path,
@@ -82,7 +95,21 @@ class GitHubCollector:
                 }
             )
 
-        return format_repository_context(repository, issue, branch, files), format_issue(issue)
+        return (
+            format_repository_context(repository, issue, branch, files),
+            issue_text,
+            {
+                "selected_files": selected,
+                "selection_diagnostics": ranked,
+                "indexed_files": sorted(content_cache),
+            },
+        )
+
+    def _get_file_content(self, target: GitHubTarget, branch: str, path: str) -> str:
+        content = self._get(
+            f"/repos/{target.owner}/{target.repository}/contents/{parse.quote(path, safe='/')}?ref={parse.quote(branch)}"
+        )
+        return decode_content(content)
 
     def _get(self, path: str) -> dict:
         endpoint = f"{self.api_url.rstrip('/')}{path}"
@@ -108,8 +135,24 @@ class GitHubCollector:
         return data
 
 
-def select_context_files(entries: list[dict], max_files: int = 8, issue_text: str = "") -> list[str]:
+def select_context_files(
+    entries: list[dict],
+    max_files: int = 8,
+    issue_text: str = "",
+    symbol_index: dict[str, set[str]] | None = None,
+) -> list[str]:
     """Select likely evidence files deterministically from a Git tree."""
+
+    return [item["path"] for item in rank_context_files(entries, max_files, issue_text, symbol_index)]
+
+
+def rank_context_files(
+    entries: list[dict],
+    max_files: int = 8,
+    issue_text: str = "",
+    symbol_index: dict[str, set[str]] | None = None,
+) -> list[dict]:
+    """Rank context files and explain each selected file's evidence signals."""
 
     issue_terms = set(re.findall(r"[a-zA-Z][a-zA-Z0-9_]{2,}", issue_text.lower()))
     stop_words = {"the", "and", "for", "with", "from", "that", "this", "issue", "add", "fix"}
@@ -140,8 +183,83 @@ def select_context_files(entries: list[dict], max_files: int = 8, issue_text: st
             continue
         path_terms = set(re.findall(r"[a-zA-Z][a-zA-Z0-9]{2,}", lower.replace("_", " ")))
         keyword_matches = len(issue_terms & path_terms)
-        candidates.append((-keyword_matches, priority, len(path), path))
-    return [path for _, _, _, path in sorted(candidates)[:max_files]]
+        symbols = (symbol_index or {}).get(path, set())
+        issue_symbols = extract_issue_symbols(issue_text)
+        exact_symbols = sorted(symbol for symbol in symbols if symbol.lower() in issue_symbols)
+        method_matches = sorted(
+            symbol for symbol in symbols if "." not in symbol and symbol.lower() in issue_symbols and symbol not in exact_symbols
+        )
+        score = (5 - priority) + (100 * len(exact_symbols)) + (60 * len(method_matches)) + (10 * keyword_matches)
+        reasons = []
+        for symbol in exact_symbols:
+            reasons.append(f"exact symbol match: {symbol}")
+        for symbol in method_matches:
+            reasons.append(f"method/symbol match: {symbol}")
+        for keyword in sorted(issue_terms & path_terms):
+            reasons.append(f"issue keyword match: {keyword}")
+        if is_test:
+            reasons.append("test-file boost")
+        elif is_readme:
+            reasons.append("README evidence")
+        elif is_config:
+            reasons.append("configuration evidence")
+        candidates.append({"path": path, "score": score, "reasons": reasons, "symbols": sorted(symbols)})
+    return sorted(candidates, key=lambda item: (-item["score"], len(item["path"]), item["path"]))[:max_files]
+
+
+def select_index_paths(entries: list[dict], max_files: int = 24) -> list[str]:
+    """Select a bounded set of source/test files to index before final ranking."""
+
+    paths = []
+    for entry in entries:
+        path = entry.get("path")
+        if entry.get("type") != "blob" or not isinstance(path, str):
+            continue
+        lower = path.lower()
+        name = lower.rsplit("/", 1)[-1]
+        extension = "." + name.rsplit(".", 1)[-1] if "." in name else ""
+        if extension in {".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rs", ".rb", ".php", ".c", ".cpp", ".h"}:
+            paths.append(path)
+    return sorted(paths, key=lambda path: ("test" not in path.lower(), len(path), path))[:max_files]
+
+
+def build_symbol_index(file_contents: dict[str, str]) -> dict[str, set[str]]:
+    """Extract Python class/function/method symbols from supplied file content."""
+
+    index: dict[str, set[str]] = {}
+    for path, content in file_contents.items():
+        if not path.lower().endswith(".py"):
+            continue
+        try:
+            tree = ast.parse(content, filename=path)
+        except SyntaxError:
+            index[path] = set()
+            continue
+        symbols: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                symbols.add(node.name)
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                for child in node.body:
+                    if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        symbols.add(f"{node.name}.{child.name}")
+        index[path] = symbols
+    return index
+
+
+def extract_issue_symbols(issue_text: str) -> set[str]:
+    """Extract possible symbols from issue prose without treating them as evidence."""
+
+    tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?", issue_text)
+    symbols = set()
+    for token in tokens:
+        if len(token) <= 2:
+            continue
+        symbols.add(token.lower())
+        if "." in token:
+            symbols.update(part.lower() for part in token.split(".") if len(part) > 2)
+    return symbols
 
 
 def decode_content(content_response: dict) -> str:

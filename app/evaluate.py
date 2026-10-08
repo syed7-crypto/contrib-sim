@@ -18,6 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ollama-url", default="http://localhost:11434")
     parser.add_argument("--offline", action="store_true", help="Use the deterministic sample response after collection.")
     parser.add_argument("--verbose", action="store_true", help="Include issue and evidence diagnostics.")
+    parser.add_argument("--output", help="Write the resulting JSON artifact to this path.")
     return parser
 
 
@@ -30,7 +31,7 @@ def main() -> int:
         issue_url = fixture["issue_url"]
         provider = args.provider or fixture.get("provider", "gemini")
         target = parse_github_urls(repository_url, issue_url)
-        repository_context, issue = GitHubCollector().collect(target)
+        repository_context, issue, collection_metadata = GitHubCollector().collect_with_metadata(target)
         output = analyze_context(
             repository_context,
             issue,
@@ -45,8 +46,15 @@ def main() -> int:
                 "issue": issue,
                 "selected_files": sorted(extract_evidence_files(repository_context)),
                 "evidence_supplied": repository_context,
+                "selection_diagnostics": collection_metadata.get("selection_diagnostics", []),
+                "indexed_files": collection_metadata.get("indexed_files", []),
             }
-        print(json.dumps(output, indent=2))
+        serialized = json.dumps(output, indent=2)
+        if args.output:
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(serialized + "\n", encoding="utf-8")
+        print(serialized)
         return 0
     except (OSError, KeyError, json.JSONDecodeError, ValueError, GitHubError, GeminiError, OllamaError) as exc:
         print(json.dumps({"status": "error", "error": str(exc)}, indent=2))

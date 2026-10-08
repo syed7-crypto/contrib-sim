@@ -3,7 +3,16 @@ import json
 import unittest
 from unittest.mock import patch
 
-from app.github import GitHubCollector, decode_content, detect_language, limit_content, parse_github_urls, select_context_files
+from app.github import (
+    GitHubCollector,
+    build_symbol_index,
+    decode_content,
+    detect_language,
+    limit_content,
+    parse_github_urls,
+    rank_context_files,
+    select_context_files,
+)
 
 
 class GitHubCollectorTests(unittest.TestCase):
@@ -42,6 +51,71 @@ class GitHubCollectorTests(unittest.TestCase):
         selected = select_context_files(entries, issue_text="Parser validation is failing")
         self.assertEqual(selected[0], "tests/test_parser.py")
         self.assertEqual(selected[1], "src/parser.py")
+
+    def test_exact_class_match_is_ranked_highly(self):
+        entries = [{"type": "blob", "path": "src/url_safe.py"}, {"type": "blob", "path": "src/other.py"}]
+        symbols = build_symbol_index({"src/url_safe.py": "class URLSafeSerializer:\n    pass", "src/other.py": "class Other:\n    pass"})
+        ranked = rank_context_files(entries, issue_text="URLSafeSerializer", symbol_index=symbols)
+        self.assertEqual(ranked[0]["path"], "src/url_safe.py")
+        self.assertIn("exact symbol match: URLSafeSerializer", ranked[0]["reasons"])
+
+    def test_exact_method_match_is_ranked_highly(self):
+        entries = [{"type": "blob", "path": "src/serializer.py"}, {"type": "blob", "path": "src/other.py"}]
+        symbols = build_symbol_index({"src/serializer.py": "class Serializer:\n    def loads(self, value):\n        return value", "src/other.py": "def dumps(value):\n    return value"})
+        ranked = rank_context_files(entries, issue_text="loads", symbol_index=symbols)
+        self.assertEqual(ranked[0]["path"], "src/serializer.py")
+        self.assertIn("exact symbol match: loads", ranked[0]["reasons"])
+
+    def test_class_and_method_match(self):
+        entries = [{"type": "blob", "path": "src/url_safe.py"}, {"type": "blob", "path": "src/other.py"}]
+        symbols = build_symbol_index({"src/url_safe.py": "class URLSafeSerializer:\n    def loads(self, value):\n        return value", "src/other.py": "def loads(value):\n    return value"})
+        ranked = rank_context_files(entries, issue_text="URLSafeSerializer.loads", symbol_index=symbols)
+        self.assertEqual(ranked[0]["path"], "src/url_safe.py")
+        self.assertIn("exact symbol match: URLSafeSerializer", ranked[0]["reasons"])
+        self.assertIn("exact symbol match: loads", ranked[0]["reasons"])
+
+    def test_filename_only_match(self):
+        entries = [{"type": "blob", "path": "src/parser.py"}, {"type": "blob", "path": "src/auth.py"}]
+        ranked = rank_context_files(entries, issue_text="parser", symbol_index={})
+        self.assertEqual(ranked[0]["path"], "src/parser.py")
+
+    def test_issue_keyword_match_is_explainable(self):
+        entries = [{"type": "blob", "path": "src/parser.py"}, {"type": "blob", "path": "src/auth.py"}]
+        ranked = rank_context_files(entries, issue_text="parser validation", symbol_index={})
+        self.assertIn("issue keyword match: parser", ranked[0]["reasons"])
+
+    def test_unrelated_file_ranks_lower(self):
+        entries = [{"type": "blob", "path": "src/parser.py"}, {"type": "blob", "path": "src/unrelated.py"}]
+        ranked = rank_context_files(entries, issue_text="parser", symbol_index={})
+        scores = {item["path"]: item["score"] for item in ranked}
+        self.assertGreater(scores["src/parser.py"], scores["src/unrelated.py"])
+
+    def test_missing_symbol_does_not_create_evidence_match(self):
+        entries = [{"type": "blob", "path": "src/parser.py"}]
+        symbols = build_symbol_index({"src/parser.py": "def parse(value):\n    return value"})
+        ranked = rank_context_files(entries, issue_text="MissingParser", symbol_index=symbols)
+        self.assertFalse(any("symbol match" in reason for reason in ranked[0]["reasons"]))
+
+    def test_itsdangerous_issue_selects_url_safe_module(self):
+        entries = [
+            {"type": "blob", "path": "src/itsdangerous/url_safe.py"},
+            {"type": "blob", "path": "src/itsdangerous/serializer.py"},
+            {"type": "blob", "path": "tests/test_itsdangerous/test_url_safe.py"},
+            {"type": "blob", "path": "tests/test_itsdangerous/test_signer.py"},
+        ]
+        contents = {
+            "src/itsdangerous/url_safe.py": "class URLSafeSerializer:\n    def loads(self, value):\n        return value",
+            "src/itsdangerous/serializer.py": "class Serializer:\n    def loads(self, value):\n        return value",
+            "tests/test_itsdangerous/test_url_safe.py": "def test_url_safe():\n    pass",
+            "tests/test_itsdangerous/test_signer.py": "def test_signer():\n    pass",
+        }
+        selected = select_context_files(
+            entries,
+            max_files=3,
+            issue_text="URLSafeSerializer.loads silently ignores max_age",
+            symbol_index=build_symbol_index(contents),
+        )
+        self.assertIn("src/itsdangerous/url_safe.py", selected)
 
     def test_detect_language(self):
         self.assertEqual(detect_language("src/parser.py"), "Python")
