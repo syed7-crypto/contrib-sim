@@ -11,11 +11,28 @@ from app.prompts import build_prompt
 
 
 VALID_RESPONSE = {
-    "issue_summary": "Validate input before parsing.",
-    "relevant_files": [{"path": "src/parser.py", "reason": "Performs parsing."}],
-    "implementation_plan": ["Reject empty input before parsing."],
-    "tests": ["Add an empty-input test."],
-    "risks": ["Avoid changing behavior for valid input."],
+    "issue_understanding": {
+        "summary": "Validate input before parsing.",
+        "expected_behavior": "Empty input is rejected.",
+        "acceptance_criteria": ["Validation occurs before parsing."],
+    },
+    "relevant_files": [
+        {
+            "path": "src/parser.py",
+            "reason": "Performs parsing.",
+            "attention": "Inspect the parser entry point.",
+        }
+    ],
+    "implementation_approach": ["Reject empty input before parsing."],
+    "tests": [
+        {
+            "path": "tests/test_parser.py",
+            "purpose": "Verify empty input is rejected.",
+            "change": "Add an empty-input test.",
+        }
+    ],
+    "risks_unknowns": ["Avoid changing behavior for valid input."],
+    "contributor_checklist": ["Run the parser tests."],
 }
 
 
@@ -24,22 +41,24 @@ class Phase1Tests(unittest.TestCase):
         prompt = build_prompt("src/parser.py", "Validate empty input")
         self.assertIn("src/parser.py", prompt)
         self.assertIn("Validate empty input", prompt)
-        self.assertIn('"implementation_plan"', prompt)
+        self.assertIn('"implementation_approach"', prompt)
+        self.assertIn('"contributor_checklist"', prompt)
 
     def test_valid_response_is_parsed(self):
         plan = parse_plan(json.dumps(VALID_RESPONSE))
-        self.assertEqual(plan.issue_summary, "Validate input before parsing.")
+        self.assertEqual(plan.issue_understanding["summary"], "Validate input before parsing.")
         self.assertEqual(plan.relevant_files[0]["path"], "src/parser.py")
 
     def test_json_is_extracted_from_surrounding_model_text(self):
         response = "Reasoning...\nFinal answer:\n" + json.dumps(VALID_RESPONSE)
         plan = parse_plan(response)
-        self.assertEqual(plan.issue_summary, "Validate input before parsing.")
+        self.assertEqual(plan.issue_understanding["summary"], "Validate input before parsing.")
 
     def test_offline_sample_matches_output_contract(self):
         plan = parse_plan(json.dumps(DEFAULT_OFFLINE_RESPONSE))
         self.assertEqual(plan.relevant_files[0]["path"], "src/parser.py")
         self.assertTrue(plan.tests)
+        self.assertTrue(plan.contributor_checklist)
 
     def test_load_local_env_does_not_override_existing_values(self):
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as env_file:
@@ -58,7 +77,7 @@ class Phase1Tests(unittest.TestCase):
 
     def test_missing_field_is_rejected(self):
         response = dict(VALID_RESPONSE)
-        del response["risks"]
+        del response["risks_unknowns"]
         with self.assertRaisesRegex(ValueError, "Missing required fields"):
             parse_plan(json.dumps(response))
 
@@ -91,7 +110,7 @@ class Phase1Tests(unittest.TestCase):
         self.assertIn("key=secret", sent_request.full_url)
         self.assertEqual(sent_payload["generationConfig"]["responseMimeType"], "application/json")
         self.assertEqual(sent_payload["generationConfig"]["thinkingConfig"]["thinkingLevel"], "minimal")
-        self.assertIn("issue_summary", sent_payload["generationConfig"]["responseJsonSchema"]["required"])
+        self.assertIn("issue_understanding", sent_payload["generationConfig"]["responseJsonSchema"]["required"])
 
 
 if __name__ == "__main__":

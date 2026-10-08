@@ -81,23 +81,51 @@ class GeminiClient:
 
         response_schema = {
             "type": "object",
-            "required": ["issue_summary", "relevant_files", "implementation_plan", "tests", "risks"],
+            "required": [
+                "issue_understanding",
+                "relevant_files",
+                "implementation_approach",
+                "tests",
+                "risks_unknowns",
+                "contributor_checklist",
+            ],
             "properties": {
-                "issue_summary": {"type": "string"},
+                "issue_understanding": {
+                    "type": "object",
+                    "required": ["summary", "expected_behavior", "acceptance_criteria"],
+                    "properties": {
+                        "summary": {"type": "string"},
+                        "expected_behavior": {"type": "string"},
+                        "acceptance_criteria": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
                 "relevant_files": {
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "required": ["path", "reason"],
+                        "required": ["path", "reason", "attention"],
                         "properties": {
                             "path": {"type": "string"},
                             "reason": {"type": "string"},
+                            "attention": {"type": "string"},
                         },
                     },
                 },
-                "implementation_plan": {"type": "array", "items": {"type": "string"}},
-                "tests": {"type": "array", "items": {"type": "string"}},
-                "risks": {"type": "array", "items": {"type": "string"}},
+                "implementation_approach": {"type": "array", "items": {"type": "string"}},
+                "tests": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["path", "purpose", "change"],
+                        "properties": {
+                            "path": {"type": "string"},
+                            "purpose": {"type": "string"},
+                            "change": {"type": "string"},
+                        },
+                    },
+                },
+                "risks_unknowns": {"type": "array", "items": {"type": "string"}},
+                "contributor_checklist": {"type": "array", "items": {"type": "string"}},
             },
         }
         payload = json.dumps(

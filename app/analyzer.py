@@ -6,13 +6,14 @@ from typing import Any
 
 @dataclass
 class ContributionPlan:
-    """The stable Phase 1 output contract."""
+    """Machine-readable plan produced by the Contributor Simulator."""
 
-    issue_summary: str
+    issue_understanding: dict[str, Any]
     relevant_files: list[dict[str, str]]
-    implementation_plan: list[str]
-    tests: list[str]
-    risks: list[str]
+    implementation_approach: list[str]
+    tests: list[dict[str, str]]
+    risks_unknowns: list[str]
+    contributor_checklist: list[str]
 
     @classmethod
     def from_dict(cls, value: Any) -> "ContributionPlan":
@@ -20,37 +21,70 @@ class ContributionPlan:
             raise ValueError("The model response must be a JSON object.")
 
         required = {
-            "issue_summary",
+            "issue_understanding",
             "relevant_files",
-            "implementation_plan",
+            "implementation_approach",
             "tests",
-            "risks",
+            "risks_unknowns",
+            "contributor_checklist",
         }
         missing = required - value.keys()
         if missing:
             raise ValueError(f"Missing required fields: {', '.join(sorted(missing))}")
 
-        issue_summary = value["issue_summary"]
-        if not isinstance(issue_summary, str) or not issue_summary.strip():
-            raise ValueError("issue_summary must be a non-empty string.")
+        issue_understanding = value["issue_understanding"]
+        if not isinstance(issue_understanding, dict):
+            raise ValueError("issue_understanding must be an object.")
+        for field in ("summary", "expected_behavior"):
+            if not isinstance(issue_understanding.get(field), str) or not issue_understanding[field].strip():
+                raise ValueError(f"issue_understanding.{field} must be a non-empty string.")
+        acceptance_criteria = issue_understanding.get("acceptance_criteria")
+        if not isinstance(acceptance_criteria, list) or not all(isinstance(item, str) for item in acceptance_criteria):
+            raise ValueError("issue_understanding.acceptance_criteria must be a list of strings.")
 
         relevant_files = value["relevant_files"]
         if not isinstance(relevant_files, list):
             raise ValueError("relevant_files must be a list.")
         normalized_files: list[dict[str, str]] = []
         for item in relevant_files:
-            if not isinstance(item, dict) or not isinstance(item.get("path"), str) or not isinstance(item.get("reason"), str):
-                raise ValueError("Each relevant_files item needs string path and reason fields.")
-            normalized_files.append({"path": item["path"], "reason": item["reason"]})
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("path"), str)
+                or not isinstance(item.get("reason"), str)
+                or not isinstance(item.get("attention"), str)
+            ):
+                raise ValueError("Each relevant_files item needs string path, reason, and attention fields.")
+            normalized_files.append(
+                {"path": item["path"], "reason": item["reason"], "attention": item["attention"]}
+            )
+
+        implementation_approach = value["implementation_approach"]
+        if not isinstance(implementation_approach, list) or not all(isinstance(item, str) for item in implementation_approach):
+            raise ValueError("implementation_approach must be a list of strings.")
+
+        normalized_tests: list[dict[str, str]] = []
+        if not isinstance(value["tests"], list):
+            raise ValueError("tests must be a list.")
+        for item in value["tests"]:
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str) or not isinstance(item.get("purpose"), str) or not isinstance(item.get("change"), str):
+                raise ValueError("Each tests item needs string path, purpose, and change fields.")
+            normalized_tests.append({"path": item["path"], "purpose": item["purpose"], "change": item["change"]})
 
         lists: dict[str, list[str]] = {}
-        for field in ("implementation_plan", "tests", "risks"):
+        for field in ("risks_unknowns", "contributor_checklist"):
             items = value[field]
             if not isinstance(items, list) or not all(isinstance(item, str) for item in items):
                 raise ValueError(f"{field} must be a list of strings.")
             lists[field] = items
 
-        return cls(issue_summary, normalized_files, lists["implementation_plan"], lists["tests"], lists["risks"])
+        return cls(
+            issue_understanding,
+            normalized_files,
+            implementation_approach,
+            normalized_tests,
+            lists["risks_unknowns"],
+            lists["contributor_checklist"],
+        )
 
 
 def parse_plan(response: str) -> ContributionPlan:

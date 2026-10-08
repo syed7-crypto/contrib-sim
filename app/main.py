@@ -20,28 +20,43 @@ tests/
   test_parser.py"""
 DEFAULT_ISSUE = "Add validation for empty input before parsing."
 DEFAULT_OFFLINE_RESPONSE = {
-    "issue_summary": "Validate input before the parser processes it.",
+    "issue_understanding": {
+        "summary": "Validate input before the parser processes it.",
+        "expected_behavior": "Empty input should be rejected before parsing begins.",
+        "acceptance_criteria": ["Empty input is detected before parser logic runs."],
+    },
     "relevant_files": [
         {
             "path": "src/parser.py",
             "reason": "This is the likely entry point for input validation and parsing.",
+            "attention": "Inspect the parser entry point and add the validation before parsing.",
         },
         {
             "path": "tests/test_parser.py",
             "reason": "This test module should cover empty-input behavior.",
+            "attention": "Add a focused test for empty input while preserving valid-input coverage.",
         },
     ],
-    "implementation_plan": [
+    "implementation_approach": [
         "Add an explicit empty-input check before parsing.",
         "Choose a clear error or validation result consistent with the existing parser API.",
     ],
     "tests": [
-        "Add a test confirming empty input is rejected before parsing.",
-        "Keep existing valid-input tests passing.",
+        {
+            "path": "tests/test_parser.py",
+            "purpose": "Verify empty input is rejected before parsing.",
+            "change": "Add an empty-input test and preserve valid-input tests.",
+        }
     ],
-    "risks": [
+    "risks_unknowns": [
         "The new validation must not change behavior for valid input.",
         "The expected empty-input behavior may depend on the parser's public API.",
+    ],
+    "contributor_checklist": [
+        "Inspect the parser entry point and existing error conventions.",
+        "Implement validation before parsing.",
+        "Add or update focused tests.",
+        "Run the relevant test suite.",
     ],
 }
 

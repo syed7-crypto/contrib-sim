@@ -1,19 +1,25 @@
-"""Prompt construction for the Phase 1 contributor simulation."""
+"""Prompt construction for the Contributor Simulator."""
 
 import json
 
 
 OUTPUT_SCHEMA = {
-    "issue_summary": "string",
+    "issue_understanding": {
+        "summary": "string",
+        "expected_behavior": "string",
+        "acceptance_criteria": ["string"],
+    },
     "relevant_files": [
         {
             "path": "string",
             "reason": "string",
+            "attention": "string",
         }
     ],
-    "implementation_plan": ["string"],
-    "tests": ["string"],
-    "risks": ["string"],
+    "implementation_approach": ["string"],
+    "tests": [{"path": "string", "purpose": "string", "change": "string"}],
+    "risks_unknowns": ["string"],
+    "contributor_checklist": ["string"],
 }
 
 
@@ -32,7 +38,8 @@ Use only the repository context and issue below. Do not claim that files,
 functions, or behavior exist unless they are supported by the context.
 Reason about the specific issue rather than giving generic repository advice.
 
-Return only valid JSON. Do not wrap it in Markdown code fences. The JSON must
+    Return only valid JSON. Do not include reasoning, drafting notes, or Markdown
+    code fences. The JSON must
 match this shape exactly:
 {schema}
 
