@@ -8,16 +8,25 @@ from pathlib import Path
 from app.analyzer import parse_plan
 from app.gemma import GeminiClient, GeminiError, OllamaClient, OllamaError
 from app.github import GitHubCollector, GitHubError, parse_github_urls
+from app.grounding import extract_evidence_files, validate_plan_grounding
+from app.review import review_contribution_plan
 from app.prompts import build_prompt
 
 
-DEFAULT_CONTEXT = """src/
-  parser.py
-  models.py
-  config.py
+DEFAULT_CONTEXT = """Repository: sample/project
 
-tests/
-  test_parser.py"""
+Selected files:
+--- src/parser.py (Python, 1 lines) ---
+# Parser implementation supplied as repository evidence.
+
+--- src/models.py (Python, 1 lines) ---
+# Model definitions supplied as repository evidence.
+
+--- src/config.py (Python, 1 lines) ---
+# Configuration supplied as repository evidence.
+
+--- tests/test_parser.py (Python, 1 lines) ---
+# Parser tests supplied as repository evidence."""
 DEFAULT_ISSUE = "Add validation for empty input before parsing."
 DEFAULT_OFFLINE_RESPONSE = {
     "issue_understanding": {
@@ -70,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama base URL.")
     parser.add_argument("--repo-url", help="Public GitHub repository URL.")
     parser.add_argument("--issue-url", help="GitHub issue URL in that repository.")
+    parser.add_argument("--verbose", action="store_true", help="Include issue and evidence diagnostics in JSON output.")
     parser.add_argument(
         "--offline",
         action="store_true",
@@ -105,6 +115,33 @@ def load_local_env(path: str = ".env") -> None:
             os.environ.setdefault(key, value)
 
 
+def analyze_context(
+    repository_context: str,
+    issue: str,
+    provider: str,
+    model: str | None = None,
+    ollama_url: str = "http://localhost:11434",
+    offline: bool = False,
+) -> dict:
+    """Run plan generation, grounding, and review for supplied evidence."""
+
+    prompt = build_prompt(repository_context, issue)
+    if offline:
+        plan = parse_plan(json.dumps(DEFAULT_OFFLINE_RESPONSE))
+    elif provider == "gemini":
+        client = GeminiClient.from_environment(model=model)
+        plan = parse_plan(client.generate(prompt))
+    else:
+        client = OllamaClient(model=model or "gemma4:e4b", base_url=ollama_url)
+        plan = parse_plan(client.generate(prompt))
+
+    grounding = validate_plan_grounding(plan, repository_context, issue)
+    output = dict(plan.__dict__)
+    output["grounding"] = grounding
+    output["review"] = review_contribution_plan(plan, grounding, repository_context).to_dict()
+    return output
+
+
 def main() -> int:
     load_local_env()
     args = build_parser().parse_args()
@@ -118,20 +155,25 @@ def main() -> int:
         else:
             repository_context = read_context(args.context)
             issue = args.issue
-        prompt = build_prompt(repository_context, issue)
-        if args.offline:
-            plan = parse_plan(json.dumps(DEFAULT_OFFLINE_RESPONSE))
-        elif args.provider == "gemini":
-            client = GeminiClient.from_environment(model=args.model)
-            plan = parse_plan(client.generate(prompt))
-        else:
-            client = OllamaClient(model=args.model or "gemma4:e4b", base_url=args.ollama_url)
-            plan = parse_plan(client.generate(prompt))
+        output = analyze_context(
+            repository_context,
+            issue,
+            args.provider,
+            model=args.model,
+            ollama_url=args.ollama_url,
+            offline=args.offline,
+        )
     except (GeminiError, GitHubError, OllamaError, ValueError) as exc:
         print(f"Error: {exc}")
         return 1
 
-    print(json.dumps(plan.__dict__, indent=2))
+    if args.verbose:
+        output["debug"] = {
+            "issue": issue,
+            "selected_files": sorted(extract_evidence_files(repository_context)),
+            "evidence_supplied": repository_context,
+        }
+    print(json.dumps(output, indent=2))
     return 0
 
 if __name__ == "__main__":

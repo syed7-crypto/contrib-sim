@@ -89,3 +89,16 @@ Run tests:
 ```bash
 python -m unittest discover -s tests
 ```
+
+## End-to-end evaluation
+
+Run the repeatable evaluation fixture against a real public repository and
+issue. This workflow only reads GitHub data and does not modify the target
+repository:
+
+```powershell
+python -m app.evaluate --fixture evaluations/hello-world-issue-1.json --verbose
+```
+
+The JSON output preserves the Contributor Plan, grounding result, review, and
+verbose diagnostics for the retrieved issue and supplied evidence.
