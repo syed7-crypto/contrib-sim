@@ -1,12 +1,17 @@
 """Small Ollama client used by the Phase 1 prototype."""
 
 import json
+import os
 from dataclasses import dataclass
-from urllib import error, request
+from urllib import error, parse, request
 
 
 class OllamaError(RuntimeError):
     """Raised when the local Ollama request cannot be completed."""
+
+
+class GeminiError(RuntimeError):
+    """Raised when the hosted Gemini API request cannot be completed."""
 
 
 @dataclass
@@ -52,4 +57,63 @@ class OllamaClient:
         result = body.get("response")
         if not isinstance(result, str) or not result.strip():
             raise OllamaError("Ollama response did not contain generated text.")
+        return result
+
+
+@dataclass
+class GeminiClient:
+    """Client for hosted Gemma through Google's Gemini API."""
+
+    api_key: str
+    model: str = "gemma-4-26b-a4b-it"
+    base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    timeout: float = 120.0
+
+    @classmethod
+    def from_environment(cls, model: str | None = None) -> "GeminiClient":
+        api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+        if not api_key:
+            raise GeminiError("GEMINI_API_KEY is not set.")
+        return cls(api_key=api_key, model=model or cls.model)
+
+    def generate(self, prompt: str) -> str:
+        """Generate a JSON response from hosted Gemma."""
+
+        payload = json.dumps(
+            {
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "responseMimeType": "application/json",
+                    "temperature": 0.2,
+                },
+            }
+        ).encode("utf-8")
+        endpoint = (
+            f"{self.base_url.rstrip('/')}/models/{parse.quote(self.model, safe='')}"
+            f":generateContent?key={parse.quote(self.api_key)}"
+        )
+        http_request = request.Request(
+            endpoint,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with request.urlopen(http_request, timeout=self.timeout) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise GeminiError(f"Gemini API returned HTTP {exc.code}: {detail}") from exc
+        except (error.URLError, TimeoutError) as exc:
+            raise GeminiError("Could not connect to the Gemini API.") from exc
+        except json.JSONDecodeError as exc:
+            raise GeminiError("Gemini API returned invalid JSON.") from exc
+
+        try:
+            result = body["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise GeminiError("Gemini API response did not contain generated text.") from exc
+        if not isinstance(result, str) or not result.strip():
+            raise GeminiError("Gemini API returned empty generated text.")
         return result

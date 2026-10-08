@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from app.analyzer import parse_plan
-from app.gemma import OllamaClient
+from app.gemma import GeminiClient, OllamaClient
 from app.main import DEFAULT_OFFLINE_RESPONSE
 from app.prompts import build_prompt
 
@@ -53,6 +53,21 @@ class Phase1Tests(unittest.TestCase):
         self.assertEqual(sent_payload["model"], "test-model")
         self.assertFalse(sent_payload["stream"])
         self.assertEqual(sent_payload["format"], "json")
+
+    @patch("app.gemma.request.urlopen")
+    def test_gemini_client_sends_json_request(self, urlopen):
+        response = urlopen.return_value.__enter__.return_value
+        response.read.return_value = json.dumps(
+            {"candidates": [{"content": {"parts": [{"text": '{"ok": true}'}]}}]}
+        ).encode()
+
+        result = GeminiClient(api_key="secret", model="test-model").generate("hello")
+
+        self.assertEqual(result, '{"ok": true}')
+        sent_request = urlopen.call_args.args[0]
+        sent_payload = json.loads(sent_request.data.decode())
+        self.assertIn("key=secret", sent_request.full_url)
+        self.assertEqual(sent_payload["generationConfig"]["responseMimeType"], "application/json")
 
 
 if __name__ == "__main__":

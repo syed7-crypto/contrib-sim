@@ -2,9 +2,11 @@
 
 import argparse
 import json
+import os
 
 from app.analyzer import parse_plan
-from app.gemma import OllamaClient, OllamaError
+from app.gemma import GeminiClient, GeminiError, OllamaClient, OllamaError
+from app.github import GitHubCollector, GitHubError, parse_github_urls
 from app.prompts import build_prompt
 
 
@@ -44,11 +46,14 @@ DEFAULT_OFFLINE_RESPONSE = {
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Create a contribution plan with local Gemma.")
+    parser = argparse.ArgumentParser(description="Create a contribution plan with Gemma.")
     parser.add_argument("--context", default=DEFAULT_CONTEXT, help="Repository context or a path to a text file.")
     parser.add_argument("--issue", default=DEFAULT_ISSUE, help="Issue description.")
-    parser.add_argument("--model", default="gemma4:e4b", help="Ollama model name.")
+    parser.add_argument("--provider", choices=("gemini", "ollama"), default=os.environ.get("CONTRIBSIM_PROVIDER", "gemini"), help="Reasoning provider.")
+    parser.add_argument("--model", help="Model name for the selected provider.")
     parser.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama base URL.")
+    parser.add_argument("--repo-url", help="Public GitHub repository URL.")
+    parser.add_argument("--issue-url", help="GitHub issue URL in that repository.")
     parser.add_argument(
         "--offline",
         action="store_true",
@@ -69,15 +74,26 @@ def read_context(value: str) -> str:
 
 def main() -> int:
     args = build_parser().parse_args()
-    prompt = build_prompt(read_context(args.context), args.issue)
 
     try:
+        if bool(args.repo_url) != bool(args.issue_url):
+            raise ValueError("Provide both --repo-url and --issue-url together.")
+        if args.repo_url and args.issue_url:
+            target = parse_github_urls(args.repo_url, args.issue_url)
+            repository_context, issue = GitHubCollector().collect(target)
+        else:
+            repository_context = read_context(args.context)
+            issue = args.issue
+        prompt = build_prompt(repository_context, issue)
         if args.offline:
             plan = parse_plan(json.dumps(DEFAULT_OFFLINE_RESPONSE))
-        else:
-            client = OllamaClient(model=args.model, base_url=args.ollama_url)
+        elif args.provider == "gemini":
+            client = GeminiClient.from_environment(model=args.model)
             plan = parse_plan(client.generate(prompt))
-    except (OllamaError, ValueError) as exc:
+        else:
+            client = OllamaClient(model=args.model or "gemma4:e4b", base_url=args.ollama_url)
+            plan = parse_plan(client.generate(prompt))
+    except (GeminiError, GitHubError, OllamaError, ValueError) as exc:
         print(f"Error: {exc}")
         return 1
 
