@@ -79,12 +79,35 @@ class GeminiClient:
     def generate(self, prompt: str) -> str:
         """Generate a JSON response from hosted Gemma."""
 
+        response_schema = {
+            "type": "object",
+            "required": ["issue_summary", "relevant_files", "implementation_plan", "tests", "risks"],
+            "properties": {
+                "issue_summary": {"type": "string"},
+                "relevant_files": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["path", "reason"],
+                        "properties": {
+                            "path": {"type": "string"},
+                            "reason": {"type": "string"},
+                        },
+                    },
+                },
+                "implementation_plan": {"type": "array", "items": {"type": "string"}},
+                "tests": {"type": "array", "items": {"type": "string"}},
+                "risks": {"type": "array", "items": {"type": "string"}},
+            },
+        }
         payload = json.dumps(
             {
                 "contents": [{"role": "user", "parts": [{"text": prompt}]}],
                 "generationConfig": {
                     "responseMimeType": "application/json",
+                    "responseJsonSchema": response_schema,
                     "temperature": 0.2,
+                    "thinkingConfig": {"thinkingLevel": "minimal"},
                 },
             }
         ).encode("utf-8")

@@ -1,10 +1,12 @@
 import json
+import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
 from app.analyzer import parse_plan
 from app.gemma import GeminiClient, OllamaClient
-from app.main import DEFAULT_OFFLINE_RESPONSE
+from app.main import DEFAULT_OFFLINE_RESPONSE, load_local_env
 from app.prompts import build_prompt
 
 
@@ -29,10 +31,30 @@ class Phase1Tests(unittest.TestCase):
         self.assertEqual(plan.issue_summary, "Validate input before parsing.")
         self.assertEqual(plan.relevant_files[0]["path"], "src/parser.py")
 
+    def test_json_is_extracted_from_surrounding_model_text(self):
+        response = "Reasoning...\nFinal answer:\n" + json.dumps(VALID_RESPONSE)
+        plan = parse_plan(response)
+        self.assertEqual(plan.issue_summary, "Validate input before parsing.")
+
     def test_offline_sample_matches_output_contract(self):
         plan = parse_plan(json.dumps(DEFAULT_OFFLINE_RESPONSE))
         self.assertEqual(plan.relevant_files[0]["path"], "src/parser.py")
         self.assertTrue(plan.tests)
+
+    def test_load_local_env_does_not_override_existing_values(self):
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as env_file:
+            env_file.write("TEST_CONTRIBSIM_KEY=from-file\n")
+            env_path = env_file.name
+        try:
+            os.environ.pop("TEST_CONTRIBSIM_KEY", None)
+            load_local_env(env_path)
+            self.assertEqual(os.environ["TEST_CONTRIBSIM_KEY"], "from-file")
+            os.environ["TEST_CONTRIBSIM_KEY"] = "existing"
+            load_local_env(env_path)
+            self.assertEqual(os.environ["TEST_CONTRIBSIM_KEY"], "existing")
+        finally:
+            os.environ.pop("TEST_CONTRIBSIM_KEY", None)
+            os.unlink(env_path)
 
     def test_missing_field_is_rejected(self):
         response = dict(VALID_RESPONSE)
@@ -68,6 +90,8 @@ class Phase1Tests(unittest.TestCase):
         sent_payload = json.loads(sent_request.data.decode())
         self.assertIn("key=secret", sent_request.full_url)
         self.assertEqual(sent_payload["generationConfig"]["responseMimeType"], "application/json")
+        self.assertEqual(sent_payload["generationConfig"]["thinkingConfig"]["thinkingLevel"], "minimal")
+        self.assertIn("issue_summary", sent_payload["generationConfig"]["responseJsonSchema"]["required"])
 
 
 if __name__ == "__main__":

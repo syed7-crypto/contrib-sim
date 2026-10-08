@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+from pathlib import Path
 
 from app.analyzer import parse_plan
 from app.gemma import GeminiClient, GeminiError, OllamaClient, OllamaError
@@ -72,7 +73,25 @@ def read_context(value: str) -> str:
         return value
 
 
+def load_local_env(path: str = ".env") -> None:
+    """Load simple KEY=VALUE entries without adding a dependency."""
+
+    env_file = Path(path)
+    if not env_file.is_file():
+        return
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and value:
+            os.environ.setdefault(key, value)
+
+
 def main() -> int:
+    load_local_env()
     args = build_parser().parse_args()
 
     try:

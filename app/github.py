@@ -2,6 +2,7 @@
 
 import base64
 import json
+import re
 from dataclasses import dataclass
 from urllib import error, parse, request
 
@@ -65,13 +66,21 @@ class GitHubCollector:
         if not isinstance(entries, list):
             raise GitHubError("GitHub returned an invalid repository tree.")
 
-        selected = select_context_files(entries, self.max_files)
+        selected = select_context_files(entries, self.max_files, format_issue(issue))
         files = []
         for path in selected:
             content = self._get(
                 f"/repos/{target.owner}/{target.repository}/contents/{parse.quote(path, safe='/')}?ref={parse.quote(branch)}"
             )
-            files.append({"path": path, "content": limit_content(decode_content(content), self.max_file_chars)})
+            file_content = limit_content(decode_content(content), self.max_file_chars)
+            files.append(
+                {
+                    "path": path,
+                    "language": detect_language(path),
+                    "line_count": str(file_content.count("\n") + 1),
+                    "content": file_content,
+                }
+            )
 
         return format_repository_context(repository, issue, branch, files), format_issue(issue)
 
@@ -99,9 +108,12 @@ class GitHubCollector:
         return data
 
 
-def select_context_files(entries: list[dict], max_files: int = 8) -> list[str]:
+def select_context_files(entries: list[dict], max_files: int = 8, issue_text: str = "") -> list[str]:
     """Select likely evidence files deterministically from a Git tree."""
 
+    issue_terms = set(re.findall(r"[a-zA-Z][a-zA-Z0-9_]{2,}", issue_text.lower()))
+    stop_words = {"the", "and", "for", "with", "from", "that", "this", "issue", "add", "fix"}
+    issue_terms -= stop_words
     candidates = []
     for entry in entries:
         path = entry.get("path")
@@ -126,8 +138,10 @@ def select_context_files(entries: list[dict], max_files: int = 8) -> list[str]:
             priority = 3
         else:
             continue
-        candidates.append((priority, len(path), path))
-    return [path for _, _, path in sorted(candidates)[:max_files]]
+        path_terms = set(re.findall(r"[a-zA-Z][a-zA-Z0-9]{2,}", lower.replace("_", " ")))
+        keyword_matches = len(issue_terms & path_terms)
+        candidates.append((-keyword_matches, priority, len(path), path))
+    return [path for _, _, _, path in sorted(candidates)[:max_files]]
 
 
 def decode_content(content_response: dict) -> str:
@@ -152,6 +166,32 @@ def limit_content(content: str, max_chars: int) -> str:
     return content[:max_chars] + "\n[File content truncated by ContribSim]"
 
 
+def detect_language(path: str) -> str:
+    """Return a simple language label for context metadata."""
+
+    extension = path.lower().rsplit(".", 1)[-1] if "." in path.rsplit("/", 1)[-1] else ""
+    return {
+        "py": "Python",
+        "js": "JavaScript",
+        "jsx": "JavaScript",
+        "ts": "TypeScript",
+        "tsx": "TypeScript",
+        "go": "Go",
+        "rs": "Rust",
+        "java": "Java",
+        "rb": "Ruby",
+        "php": "PHP",
+        "c": "C",
+        "cpp": "C++",
+        "h": "C/C++ header",
+        "md": "Markdown",
+        "toml": "TOML",
+        "json": "JSON",
+        "yml": "YAML",
+        "yaml": "YAML",
+    }.get(extension, "Unknown")
+
+
 def format_repository_context(repository: dict, issue: dict, branch: str, files: list[dict[str, str]]) -> str:
     """Create bounded, labeled evidence for the reasoning prompt."""
 
@@ -168,7 +208,8 @@ def format_repository_context(repository: dict, issue: dict, branch: str, files:
         "Selected files:",
     ]
     for file in files:
-        lines.extend([f"--- {file['path']} ---", file["content"], ""])
+        metadata = f"{file.get('language', 'Unknown')}, {file.get('line_count', '?')} lines"
+        lines.extend([f"--- {file['path']} ({metadata}) ---", file["content"], ""])
     return "\n".join(lines)
 
 

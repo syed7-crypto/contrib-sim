@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from app.github import GitHubCollector, decode_content, limit_content, parse_github_urls, select_context_files
+from app.github import GitHubCollector, decode_content, detect_language, limit_content, parse_github_urls, select_context_files
 
 
 class GitHubCollectorTests(unittest.TestCase):
@@ -32,6 +32,20 @@ class GitHubCollectorTests(unittest.TestCase):
             select_context_files(entries),
             ["README.md", "tests/test_parser.py", "src/parser.py"],
         )
+
+    def test_select_context_files_uses_issue_terms(self):
+        entries = [
+            {"type": "blob", "path": "src/auth.py"},
+            {"type": "blob", "path": "src/parser.py"},
+            {"type": "blob", "path": "tests/test_parser.py"},
+        ]
+        selected = select_context_files(entries, issue_text="Parser validation is failing")
+        self.assertEqual(selected[0], "tests/test_parser.py")
+        self.assertEqual(selected[1], "src/parser.py")
+
+    def test_detect_language(self):
+        self.assertEqual(detect_language("src/parser.py"), "Python")
+        self.assertEqual(detect_language("README.md"), "Markdown")
 
     def test_decode_content(self):
         encoded = base64.b64encode("hello".encode()).decode()

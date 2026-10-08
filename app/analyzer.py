@@ -60,6 +60,25 @@ def parse_plan(response: str) -> ContributionPlan:
 
     try:
         value = json.loads(response)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"The model did not return valid JSON: {exc.msg}") from exc
+    except json.JSONDecodeError as direct_error:
+        # Some hosted Gemma responses include reasoning before the final JSON
+        # object. Extract candidate objects, then apply the same strict schema
+        # validation used for a direct JSON response.
+        decoder = json.JSONDecoder()
+        candidates = []
+        for index, character in enumerate(response):
+            if character != "{":
+                continue
+            try:
+                candidate, _ = decoder.raw_decode(response[index:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict):
+                candidates.append(candidate)
+        for candidate in reversed(candidates):
+            try:
+                return ContributionPlan.from_dict(candidate)
+            except ValueError:
+                continue
+        raise ValueError(f"The model did not return valid JSON: {direct_error.msg}") from direct_error
     return ContributionPlan.from_dict(value)
